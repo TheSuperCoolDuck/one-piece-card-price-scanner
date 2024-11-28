@@ -1,108 +1,198 @@
 import cv2
-from skimage.metrics import structural_similarity as ssim
 import os
 import numpy as np
+import requests
+import json
+import re
 
-class Train_Card:
-    """Structure to store information about train rank images."""
+LARGE = 10000000000
+MAX_HEIGHT = 350
+MAX_WIDTH = 250
 
+class CardData:
     def __init__(self):
-        self.img = [] # Thresholded, sized rank image loaded from hard drive
+        self.image = [] # Thresholded, sized rank image loaded from hard drive
         self.name = "Placeholder"
+        self.code = "OP##-###"
+        self.price = 0.00
 
-vc = cv2.VideoCapture(0)
+def get_card_prices():
 
-# load cards
-train_cards = []
-directory = os.fsencode('Cards/')
+    # loop through card price url and grab all the products
+    current_cursor = 0
+    product_list = []
+    while current_cursor != None:
+        card_price_url = f"https://www.pricecharting.com/console/one-piece-two-legends?cursor={current_cursor}&format=json"
+        response = requests.get(card_price_url).content
+        response_dict = json.loads(response) 
+        product_list = product_list + response_dict["products"]
 
-i = 0
-for file in os.listdir(directory):
-    filename = os.fsdecode(file)
-    if filename.endswith(".jpg"):
-        train_cards.append(Train_Card())
-        train_cards[i].name = filename[0:-4]
+        if "cursor" in response_dict:
+            current_cursor = response_dict["cursor"]
+        else:
+            current_cursor = None
+    card_info_dict = {}
 
-        card_image = cv2.imread(f'Cards/{filename}', cv2.IMREAD_GRAYSCALE)
-        card_image = cv2.resize(card_image, (250, 350)) 
-        train_cards[i].img = card_image
-        i = i + 1
+    # loop through products and add the name and price into a dictionary
+    for product in product_list:
+        product_name = product["productName"]
+        code_matches = re.findall(r"OP\d\d-\d\d\d", product_name)
 
-# Keep scanning webcam while application is on
-cam_quit = False
-while cam_quit == False:
+        if len(code_matches) == 0:
+            continue
 
-    # Read from camera
-    # Display video
-    rval, frame = vc.read()
+        card_code = code_matches[0]
+        card_name = product_name.replace(f" {card_code}", '')
+        card_price = product["price1"]
 
-    # find card
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray,(5,5),0)
-    edges = cv2.Canny(blur, 1, 50)
+        card_info_dict[card_code] = {
+            "name": card_name,
+            "price": card_price
+        }
+    
+    return card_info_dict
 
-    contours = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0];
 
+def load_cards():
+    new_card_list = []
+
+    # get the card prices/name dictionary
+    card_price_info_dict = get_card_prices()
+
+    # read from card directory
+    directory = os.fsencode('Cards/')
+
+    # loop through all card photos
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+        if filename.endswith(".jpg"):
+            card_code = filename[0:-4]
+
+            new_card = CardData()
+
+            # get card code
+            new_card.code = card_code
+            
+            if card_code not in card_price_info_dict:
+                continue
+
+            # get card image
+            card_image = cv2.imread(f'Cards/{filename}', cv2.IMREAD_GRAYSCALE)
+            card_image = cv2.GaussianBlur(card_image,(5,5),0)
+            card_image = cv2.resize(card_image, (MAX_WIDTH, MAX_HEIGHT)) 
+            new_card.image = card_image
+            
+            # get card name
+            new_card.name = card_price_info_dict[card_code]["name"]
+
+            # get card price
+            new_card.price = card_price_info_dict[card_code]["price"]
+
+            # add to list
+            new_card_list.append(new_card)
+
+    return new_card_list
+
+def find_all_card_contours(edges_image):
+    contours = cv2.findContours(edges_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0];
     cards_contours = []
     for c in contours:
         perimeter = cv2.arcLength(c, True)
         if perimeter > 250: 
             cards_contours.append(c)
 
-    cv2.drawContours(frame, cards_contours, -1, (0, 255, 0), 3) 
+    return cards_contours
 
-    if(len(contours)>0):
-        max_cards_contour = max(contours, key = cv2.contourArea)
-        
-        max_cards_perimeter = cv2.arcLength(max_cards_contour, True);
-        approx = cv2.approxPolyDP(max_cards_contour,0.01*max_cards_perimeter,True)
-        pts = np.float32(approx)
-        
-        if(len(pts) >= 4):
-            max_height = 350
-            max_width = 250
+def find_input_card_points(edges_image):
+    # find all cards in the image
+    cards_contours = find_all_card_contours(edges_image)
 
-            # four input point 
-            input_pts=np.float32([pts[0][0],
-                                pts[1][0],
-                                pts[3][0],
-                                pts[2][0],])
-            
-            # output points for new transformed image
-            output_pts = np.float32([[0, 0],
-                                    [0, max_height],
-                                    [max_width , 0],
-                                    [max_width , max_height]])
+    # return early if no cards were found
+    if(len(cards_contours) == 0):
+        return np.float32()
 
+    # assume the largest found card is the card we are trying to scan
+    max_card_contour = max(cards_contours, key = cv2.contourArea)
 
-            # Compute the perspective transform M
-            M = cv2.getPerspectiveTransform(input_pts,output_pts)
+    # find the corners of the card
+    max_card_perimeter = cv2.arcLength(max_card_contour, True)
+    card_corners = cv2.approxPolyDP(max_card_contour,0.01*max_card_perimeter,True)
+    card_corner_points = np.float32(card_corners)
 
-            focused_card = cv2.warpPerspective(gray,M,(max_width,max_height),flags=cv2.INTER_LINEAR)
-            cv2.imshow("image",focused_card)
+    # return early if the found card is not card shape
+    if(len(card_corner_points) != 4):
+        return np.float32()
 
-            best_match_card_diff = 10000000000000
-            best_match_card_name = "Unknown"
+    # where the four corners are in the input
+    input_points=np.float32([card_corner_points[0][0],
+                        card_corner_points[1][0],
+                        card_corner_points[3][0],
+                        card_corner_points[2][0],])
+    
+    return input_points
 
-            for card in train_cards:
-                diff_img = cv2.absdiff(focused_card, card.img)
-                diff = int(np.sum(diff_img)/255)
-                if diff < best_match_card_diff:
-                        best_match_card_diff = diff
-                        best_match_card_name = card.name
+def get_scanned_card(input_points, gray_image):
+    # where we want the four corners to be in the output
+    output_points = np.float32([[0, 0],
+                            [0, MAX_HEIGHT],
+                            [MAX_WIDTH , 0],
+                            [MAX_WIDTH , MAX_HEIGHT]])
 
-            print(best_match_card_name)
+    # Compute the perspective transform 
+    perspective_transform = cv2.getPerspectiveTransform(input_points,output_points)
 
-    # show images
-    cv2.imshow("gray", gray)
-    cv2.imshow("blur", blur)
-    cv2.imshow("edges", edges)
-    cv2.imshow("preview", frame)
+    # transform the card to the correct dimensions
+    tranformed_card = cv2.warpPerspective(gray_image,perspective_transform,(MAX_WIDTH,MAX_HEIGHT),flags=cv2.INTER_LINEAR)
+
+    # Search through all cards and find the best match
+    best_match_card_diff = LARGE
+    best_match_card = None
+    for card in card_list:
+        diff_image = cv2.absdiff(tranformed_card, card.image)
+        match_card_diff = int(np.sum(diff_image)/255)
+        if match_card_diff < best_match_card_diff:
+                best_match_card_diff = match_card_diff
+                best_match_card = card
+
+    cv2.imshow("image",tranformed_card)
+
+    return best_match_card
+
+vc = cv2.VideoCapture(0)
+card_list = load_cards()
+cam_quit = False
+
+# Keep scanning webcam while application is on
+while cam_quit == False:
 
     # exit when ESC is pressed
     key = cv2.waitKey(20)
     if key == 27:
         cam_quit = True
+
+    # Read from camera
+    _, frame = vc.read()
+
+    # Show frame
+    cv2.imshow("preview", frame)
+
+    # process video to make scanning cards easier
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray,(5,5),0)
+    edges = cv2.Canny(blur, 1, 50)
+
+    # find card object in video
+    input_card_points = find_input_card_points(edges)
+
+    if(input_card_points.any() == False):
+        continue
+        
+    # determine what card is in the video
+    scanned_card = get_scanned_card(input_card_points, gray)
+
+    # put text on the video
+    if(scanned_card):
+        print(f"{scanned_card.name}, {scanned_card.price}")
 
 cv2.destroyWindow("preview")
 vc.release()
