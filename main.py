@@ -78,7 +78,7 @@ def load_cards():
 
             # get card image
             card_image = cv2.imread(f'Cards/{filename}', cv2.IMREAD_GRAYSCALE)
-            card_image = cv2.GaussianBlur(card_image,(5,5),0)
+            card_image = cv2.GaussianBlur(card_image,(3,3),0)
             card_image = cv2.resize(card_image, (MAX_WIDTH, MAX_HEIGHT)) 
             new_card.image = card_image
             
@@ -193,6 +193,8 @@ while cam_quit == False:
     # put text on the video
     if(scanned_card):
         print(f"{scanned_card.name}, {scanned_card.price}")
+        cv2.putText(frame, f'{scanned_card.name}, {scanned_card.price}', (int(input_card_points[0][0]), int(input_card_points[0][1])-10),cv2.FONT_HERSHEY_SIMPLEX,0.6,(255,255,255),3)
+        cv2.imshow("preview", frame)
 
 cv2.destroyWindow("preview")
 vc.release()
