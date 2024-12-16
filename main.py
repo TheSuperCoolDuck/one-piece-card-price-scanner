@@ -123,38 +123,76 @@ def find_input_card_points(edges_image):
     if(len(card_corner_points) != 4):
         return np.float32()
 
+    # get width and height of found card
+    _,_,w,h = cv2.boundingRect(card_corners)
+
+    # print(w,h)
+
     # where the four corners are in the input
     input_points=np.float32([card_corner_points[0][0],
-                        card_corner_points[1][0],
-                        card_corner_points[3][0],
-                        card_corner_points[2][0],])
-    
+                    card_corner_points[1][0],
+                    card_corner_points[3][0],
+                    card_corner_points[2][0]])
+
     return input_points
 
 def get_scanned_card(input_points, gray_image):
+
     # where we want the four corners to be in the output
-    output_points = np.float32([[0, 0],
-                            [0, MAX_HEIGHT],
-                            [MAX_WIDTH , 0],
-                            [MAX_WIDTH , MAX_HEIGHT]])
 
-    # Compute the perspective transform 
-    perspective_transform = cv2.getPerspectiveTransform(input_points,output_points)
+    # Try all four orientations 
+    output_points_list = []
+    output_points_list.append(
+        np.float32([[0, 0],
+                    [0, MAX_HEIGHT],
+                    [MAX_WIDTH, 0],
+                    [MAX_WIDTH, MAX_HEIGHT]])
+    )
+    output_points_list.append(
+        np.float32([[MAX_WIDTH, 0],
+                    [0, 0],
+                    [MAX_WIDTH, MAX_HEIGHT],
+                    [0, MAX_HEIGHT]])
+    )
+    output_points_list.append(
+        np.float32([[MAX_WIDTH, MAX_HEIGHT],
+                    [MAX_WIDTH, 0],
+                    [0, MAX_HEIGHT],
+                    [0, 0]])
+    )
+    output_points_list.append(
+        np.float32([[0, MAX_HEIGHT],
+                    [MAX_WIDTH, MAX_HEIGHT],
+                    [0, 0],
+                    [MAX_WIDTH, 0]])
+    )
 
-    # transform the card to the correct dimensions
-    tranformed_card = cv2.warpPerspective(gray_image,perspective_transform,(MAX_WIDTH,MAX_HEIGHT),flags=cv2.INTER_LINEAR)
+    transformed_card_list = []
 
-    # Search through all cards and find the best match
+    for output_points in output_points_list:
+        # Compute the perspective transform 
+        perspective_transform = cv2.getPerspectiveTransform(input_points,output_points)
+
+         # transform the card to the correct dimensions
+        transformed_card_list.append(cv2.warpPerspective(gray_image,perspective_transform,(MAX_WIDTH,MAX_HEIGHT),flags=cv2.INTER_LINEAR))
+
     best_match_card_diff = LARGE
     best_match_card = None
-    for card in card_list:
-        diff_image = cv2.absdiff(tranformed_card, card.image)
-        match_card_diff = int(np.sum(diff_image)/255)
-        if match_card_diff < best_match_card_diff:
-                best_match_card_diff = match_card_diff
-                best_match_card = card
+    best_match_transformed_card = None
 
-    cv2.imshow("image",tranformed_card)
+    # Search through all cards to find the best match
+    for card in card_list:
+        for transformed_card in transformed_card_list:
+            diff_image = cv2.absdiff(transformed_card, card.image)
+            match_card_diff = int(np.sum(diff_image)/255)
+            if match_card_diff < best_match_card_diff:
+
+                    # This is the correct best match
+                    best_match_card_diff = match_card_diff
+                    best_match_card = card
+                    best_match_transformed_card = transformed_card
+
+    cv2.imshow("image",best_match_transformed_card)
 
     return best_match_card
 
@@ -192,7 +230,7 @@ while cam_quit == False:
 
     # put text on the video
     if(scanned_card):
-        print(f"{scanned_card.name}, {scanned_card.price}")
+        # print(f"{scanned_card.name}, {scanned_card.price}")
         cv2.putText(frame, f'{scanned_card.name}, {scanned_card.price}', (int(input_card_points[0][0]), int(input_card_points[0][1])-10),cv2.FONT_HERSHEY_SIMPLEX,0.6,(255,255,255),3)
         cv2.imshow("preview", frame)
 
