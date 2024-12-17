@@ -231,7 +231,7 @@ while cam_quit == False:
     # put text on the video
     if(scanned_card):
         # print(f"{scanned_card.name}, {scanned_card.price}")
-        cv2.putText(frame, f'{scanned_card.name}, {scanned_card.price}', (int(input_card_points[0][0]), int(input_card_points[0][1])-10),cv2.FONT_HERSHEY_SIMPLEX,0.6,(255,255,255),3)
+        cv2.putText(frame, f'{scanned_card.name}, {scanned_card.price}', (int(input_card_points[0][0]), int(input_card_points[0][1])-10),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2, cv2.LINE_AA)
         cv2.imshow("preview", frame)
 
 cv2.destroyWindow("preview")
