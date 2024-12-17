@@ -22,7 +22,7 @@ def get_card_prices():
     current_cursor = 0
     product_list = []
     while current_cursor != None:
-        card_price_url = f"https://www.pricecharting.com/console/one-piece-two-legends?cursor={current_cursor}&format=json"
+        card_price_url = f"https://infinite-api.tcgplayer.com/priceguide/set/23589/cards/?rows=5000&productTypeID=110
         response = requests.get(card_price_url).content
         response_dict = json.loads(response) 
         product_list = product_list + response_dict["products"]
