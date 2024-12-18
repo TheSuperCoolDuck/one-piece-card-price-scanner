@@ -5,6 +5,7 @@ import requests
 import json
 import re
 
+CARD_DIR = 'OP-09'
 LARGE = 10000000000
 MAX_HEIGHT = 350
 MAX_WIDTH = 250
@@ -13,42 +14,34 @@ class CardData:
     def __init__(self):
         self.image = [] # Thresholded, sized rank image loaded from hard drive
         self.name = "Placeholder"
-        self.code = "OP##-###"
+        self.product_id = "0"
+        self.number = "0"
         self.price = 0.00
 
 def get_card_prices():
 
     # loop through card price url and grab all the products
-    current_cursor = 0
-    product_list = []
-    while current_cursor != None:
-        card_price_url = f"https://infinite-api.tcgplayer.com/priceguide/set/23589/cards/?rows=5000&productTypeID=110
-        response = requests.get(card_price_url).content
-        response_dict = json.loads(response) 
-        product_list = product_list + response_dict["products"]
+    card_price_url = f"https://infinite-api.tcgplayer.com/priceguide/set/23589/cards/?rows=5000&productTypeID=110"
+    response = requests.get(card_price_url).content
+    response_dict = json.loads(response) 
 
-        if "cursor" in response_dict:
-            current_cursor = response_dict["cursor"]
-        else:
-            current_cursor = None
+    # key is the tcg player product id
+    # value is name and price
     card_info_dict = {}
 
     # loop through products and add the name and price into a dictionary
-    for product in product_list:
-        product_name = product["productName"]
-        code_matches = re.findall(r"OP\d\d-\d\d\d", product_name)
+    for product in response_dict["result"]:
+        if len(re.findall(r"Near Mint", product["condition"])) > 0:
+            product_id = str(product["productID"])
+            product_name = product["productName"]
+            product_price = product["marketPrice"]
+            product_number = product["number"]
 
-        if len(code_matches) == 0:
-            continue
-
-        card_code = code_matches[0]
-        card_name = product_name.replace(f" {card_code}", '')
-        card_price = product["price1"]
-
-        card_info_dict[card_code] = {
-            "name": card_name,
-            "price": card_price
-        }
+            card_info_dict[product_id] = {
+                "name": product_name,
+                "price": product_price,
+                "number": product_number
+            }
     
     return card_info_dict
 
@@ -60,33 +53,36 @@ def load_cards():
     card_price_info_dict = get_card_prices()
 
     # read from card directory
-    directory = os.fsencode('Cards/')
+    directory = os.fsencode(CARD_DIR)
 
     # loop through all card photos
     for file in os.listdir(directory):
         filename = os.fsdecode(file)
         if filename.endswith(".jpg"):
-            card_code = filename[0:-4]
+            product_id = filename[9:-4]
 
             new_card = CardData()
 
             # get card code
-            new_card.code = card_code
+            new_card.product_id = product_id
             
-            if card_code not in card_price_info_dict:
+            if product_id not in card_price_info_dict:
                 continue
 
             # get card image
-            card_image = cv2.imread(f'Cards/{filename}', cv2.IMREAD_GRAYSCALE)
+            card_image = cv2.imread(f'{CARD_DIR}/{filename}', cv2.IMREAD_GRAYSCALE)
             card_image = cv2.GaussianBlur(card_image,(3,3),0)
             card_image = cv2.resize(card_image, (MAX_WIDTH, MAX_HEIGHT)) 
             new_card.image = card_image
             
             # get card name
-            new_card.name = card_price_info_dict[card_code]["name"]
+            new_card.name = card_price_info_dict[product_id]["name"]
 
             # get card price
-            new_card.price = card_price_info_dict[card_code]["price"]
+            new_card.price = card_price_info_dict[product_id]["price"]
+
+            # get card number
+            new_card.number = card_price_info_dict[product_id]["number"]
 
             # add to list
             new_card_list.append(new_card)
@@ -125,8 +121,6 @@ def find_input_card_points(edges_image):
 
     # get width and height of found card
     _,_,w,h = cv2.boundingRect(card_corners)
-
-    # print(w,h)
 
     # where the four corners are in the input
     input_points=np.float32([card_corner_points[0][0],
@@ -192,7 +186,7 @@ def get_scanned_card(input_points, gray_image):
                     best_match_card = card
                     best_match_transformed_card = transformed_card
 
-    cv2.imshow("image",best_match_transformed_card)
+    # cv2.imshow("image",best_match_transformed_card)
 
     return best_match_card
 
@@ -230,8 +224,13 @@ while cam_quit == False:
 
     # put text on the video
     if(scanned_card):
-        # print(f"{scanned_card.name}, {scanned_card.price}")
-        cv2.putText(frame, f'{scanned_card.name}, {scanned_card.price}', (int(input_card_points[0][0]), int(input_card_points[0][1])-10),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2, cv2.LINE_AA)
+        # print(f"{scanned_card.name}, {scanned_card.price}, {scanned_card.number}, {scanned_card.product_id}")
+
+        cv2.putText(frame, f'{scanned_card.name}', (int(input_card_points[0][0]), int(input_card_points[0][1])),cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,0),5, cv2.LINE_AA)
+        cv2.putText(frame, f'${scanned_card.price}', (int(input_card_points[0][0]), int(input_card_points[0][1]+50)),cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,0),5, cv2.LINE_AA)
+
+        cv2.putText(frame, f'{scanned_card.name}', (int(input_card_points[0][0]), int(input_card_points[0][1])),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2, cv2.LINE_AA)
+        cv2.putText(frame, f'${scanned_card.price}', (int(input_card_points[0][0]), int(input_card_points[0][1]+50)),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2, cv2.LINE_AA)
         cv2.imshow("preview", frame)
 
 cv2.destroyWindow("preview")
